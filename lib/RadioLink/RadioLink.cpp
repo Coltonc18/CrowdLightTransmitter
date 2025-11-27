@@ -26,15 +26,12 @@ void RadioLink::begin() {
 void RadioLink::sendDmxPacket(uint8_t* dmxData, uint16_t length) {
     // Protocol: [0xAA] [Length] [Data...] [Checksum]
     
-    _serial->write(0xAA);           // Start Byte
-    _serial->write(length * 3);     // Total channels (3 per LED)
+    _serial->write(0xAA);    // Start Byte
+    _serial->write(length);  // Total channels
     
     uint8_t checksum = 0xAA;
     
-    // Send data (R, G, B for each LED)
-    // Note: length here is number of LEDs (NUM_LEDS) based on your logic,
-    // or total bytes. Adjust loop limit accordingly. 
-    // Assuming 'length' is total BYTES passed from main:
+    // Send data for each LED (already multiplied by CHAN_PER_LED when called)
     for (int i = 0; i < length; i++) {
         _serial->write(dmxData[i]);
         checksum ^= dmxData[i];

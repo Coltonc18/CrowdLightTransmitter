@@ -4,12 +4,22 @@
 #include <Arduino.h>
 
 // E1.31 Settings
+#define DEFAULT_IP 192,168,0,100
 #define E131_PORT 5568
-#define UNIVERSE 129
-#define NUM_LEDS 10
-#define PACKET_BUFFER_SIZE 638
+#define DEFAULT_DHCP_STATUS false
+#define MIN_UNIVERSE 1
+#define DEFAULT_UNIVERSE 129
+#define MAX_UNIVERSE 63999
+#define MIN_NUM_LEDS 0
+#define DEFAULT_NUM_LEDS 10
+#define MAX_NUM_LEDS 50
 #define HEADER_SIZE 126
 #define DMX_STARTCODE 0
+#define DMX_MAX_CHANNELS 512
+#define E131_UNIVERSE_OFFSET 113
+#define E131_LENGTH_OFFSET 123
+#define E131_HEADER_SIZE 126
+#define E131_MAX_PACKET_SIZE E131_HEADER_SIZE + DMX_MAX_CHANNELS
 
 // Ethernet SPI Pins (ESP32-S3)
 #define ETH_MISO 13
@@ -29,8 +39,18 @@
 #define OLED_ADDR 0x3C
 #define DISPLAY_SDA 8
 #define DISPLAY_SCL 9
+#define STATUS_SCREEN_LENGTH_MS 3000
 
-// Onboard LED
+// LED Settings
 #define NEOPIXEL 48
+#define RGB_STRIP 0 // TODO: Assign actual pin of rgb strip
+#define CHAN_PER_LED 3
+
+// Buttons
+#define BTN_UP    20
+#define BTN_DOWN  21
+#define BTN_LEFT  22
+#define BTN_RIGHT 23
+#define BTN_SEL   24
 
 #endif

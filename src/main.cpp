@@ -1,46 +1,60 @@
 #include <Arduino.h>
+#include <nvs_flash.h>
 #include "Config.h"
+#include "ConfigData.h"
+#include "ConfigManager.h"
 #include "E131Handler.h"
 #include "RadioLink.h"
 #include "DisplayMgr.h"
 
-// --- Objects ---
+// Objects
+ConfigManager configMgr;
 DisplayMgr displayMgr; 
 E131Handler eth;
 RadioLink radio;
 
-// --- Network Settings ---
-byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
-IPAddress ip(192, 168, 0, 100);
-
-// --- Shared Data ---
+// Shared Data
+DeviceConfig deviceConfig;
 volatile bool packetReceived = false;
-volatile int  lastDataLen = 0;
+unsigned long lastPacketTime = 0;
 uint8_t sharedDmxData[512];
 
+// Tasks
 TaskHandle_t NetworkTaskHandle;
 TaskHandle_t DisplayTaskHandle;
+TaskHandle_t InputTaskHandle;
 
-// ==========================================
-// CORE 0: Network Logic
-// ==========================================
+// Callback
+void saveConfigCallback(const DeviceConfig& cfg) {
+    configMgr.saveConfig(cfg);
+    // Update live settings
+    eth.setUniverse(cfg.universe);
+}
+
+// --- CORE 0: Network ---
 void networkLoop(void * parameter) {
     uint8_t localDmxBuffer[512]; 
-    eth.begin(mac, ip);
+    
+    // Note: We use static MAC, but IP is loaded from config
+    byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
+    IPAddress currentIP(deviceConfig.ipAddress);
+
+    eth.begin(mac, currentIP);
+    eth.setUniverse(deviceConfig.universe);
     radio.begin();
 
     for(;;) {
         if (eth.checkHardware()) {
             int len = eth.parsePacket(localDmxBuffer);
             if (len > 0) {
-                // Radio TX
-                int bytesToSend = 3 * NUM_LEDS;
+                // Determine LEDs to send based on Config
+                int bytesToSend = CHAN_PER_LED * deviceConfig.numLeds;
                 if (bytesToSend > len) bytesToSend = len; 
+                
                 radio.sendDmxPacket(localDmxBuffer, bytesToSend);
 
-                // Update Shared Memory
                 memcpy(sharedDmxData, localDmxBuffer, len);
-                lastDataLen = len;
+                lastPacketTime = millis();
                 packetReceived = true;
                 
                 neopixelWrite(NEOPIXEL, localDmxBuffer[0], localDmxBuffer[1], localDmxBuffer[2]);
@@ -52,55 +66,70 @@ void networkLoop(void * parameter) {
     }
 }
 
-// ==========================================
-// CORE 1: UI & Orchestration
-// ==========================================
+// --- CORE 1: Buttons ---
+void buttonInputLoop(void * parameter) {
+    int pins[] = {BTN_UP, BTN_DOWN, BTN_LEFT, BTN_RIGHT, BTN_SEL};
+    int lastState[] = {HIGH, HIGH, HIGH, HIGH, HIGH};
+
+    for(;;) {
+        for(int i=0; i<5; i++) {
+            int read = digitalRead(pins[i]);
+            if(read == LOW && lastState[i] == HIGH) {
+                // Button Pressed
+                displayMgr.handleButtonPress(pins[i], deviceConfig, saveConfigCallback);
+            }
+            lastState[i] = read;
+        }
+        vTaskDelay(50); // Debounce
+    }
+}
+
+// --- CORE 1: Display ---
 void displayLoop(void * parameter) {
     for (;;) {
-        // 1. Refresh Rate Control (10 FPS)
-        vTaskDelay(100);
+        vTaskDelay(100); // 10 FPS
 
-        // 2. Grab atomic copy of data (optional but good practice)
-        // For simple display, direct access is okay given the volatile flags
-        bool hasData = packetReceived;
-        packetReceived = false; // Reset "New Packet" flag for visual effect
+        // Determine Status
+        E131Status status = STATUS_DISCONNECTED;
+        if (Ethernet.linkStatus() == LinkON) {
+            if (millis() - lastPacketTime < 2500) {
+                status = STATUS_ACTIVE;
+            } else if (lastPacketTime > 0) { 
+                status = STATUS_IDLE; 
+            } else {
+                status = STATUS_CONNECTED;
+            }
+        } else {
+            status = STATUS_DISCONNECTED;
+        }
 
-        // 3. Render
-        displayMgr.render(
-            ip, 
-            UNIVERSE, 
-            hasData, 
-            lastDataLen, 
-            sharedDmxData
-        );
+        IPAddress currentIP(deviceConfig.ipAddress);
+        displayMgr.render(deviceConfig, currentIP, status);
     }
 }
 
 void setup() {
     Serial.begin(115200);
-    
-    // 1. Initialize Display Subsystem
-    // (This now handles Wire.begin internally)
+
+    // 1. Config
+    configMgr.begin();
+    configMgr.loadConfig(deviceConfig);
+
+    // 2. Buttons
+    pinMode(BTN_UP, INPUT_PULLUP);
+    pinMode(BTN_DOWN, INPUT_PULLUP);
+    pinMode(BTN_LEFT, INPUT_PULLUP);
+    pinMode(BTN_RIGHT, INPUT_PULLUP);
+    pinMode(BTN_SEL, INPUT_PULLUP);
+
+    // 3. Display
     displayMgr.begin();
-    
-    Serial.println("Starting Network Task...");
-    // 2. Launch Core 0
-    xTaskCreatePinnedToCore(
-        networkLoop, "NetworkTask", 10000, NULL, 1, &NetworkTaskHandle, 0
-    );
 
-    Serial.println("Starting Display Task...");
-    // 3. Launch Core 1
-    xTaskCreatePinnedToCore(
-        displayLoop, "DisplayTask", 10000, NULL, 1, &DisplayTaskHandle, 1
-    );
-
-    // 4. FUTURE: Check Button Inputs
-    // if (digitalRead(BUTTON_PIN) == LOW) {
-    //    displayMgr.toggleMenu();
-    // }
+    // 4. Tasks
+    Serial.println("Starting Tasks...");
+    xTaskCreatePinnedToCore(networkLoop, "NetTask", 10000, NULL, 1, &NetworkTaskHandle, 0);
+    xTaskCreatePinnedToCore(displayLoop, "DispTask", 10000, NULL, 1, &DisplayTaskHandle, 1);
+    xTaskCreatePinnedToCore(buttonInputLoop, "InTask", 4096, NULL, 1, &InputTaskHandle, 1);
 }
 
-void loop() {
-
-}
+void loop() {}

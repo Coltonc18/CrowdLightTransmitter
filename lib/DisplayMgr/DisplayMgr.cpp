@@ -1,91 +1,171 @@
 #include "DisplayMgr.h"
 
-DisplayMgr::DisplayMgr()
-    : _oled(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1), _currentState(SCREEN_BOOT) {}
+DisplayMgr::DisplayMgr() : _oled(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1), _currentState(SCREEN_BOOT) {}
 
 void DisplayMgr::begin() {
-    // We handle the Wire initialization here to keep main.cpp clean
     Wire.begin(DISPLAY_SDA, DISPLAY_SCL);
-
     if(!_oled.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
-        Serial.println(F("Display Alloc Failed"));
-        // In a real app, maybe blink an LED code here
+        Serial.println(F("OLED Fail"));
     }
-    
     _oled.clearDisplay();
-    _oled.setTextColor(SSD1306_WHITE);
-    _oled.setTextSize(1);
     
-    // Show Boot Screen immediately
-    _oled.setCursor(20, 25);
-    _oled.println(F("SYSTEM BOOT..."));
-    _oled.display();
-    delay(1000); // Visual pause
-    
-    _currentState = SCREEN_STATUS;
+    _currentState = SCREEN_STATUS_IP;
 }
 
-void DisplayMgr::toggleMenu() {
-    // Simple toggle for now. 
-    // Later you can make this cycle: Status -> Menu -> Settings -> Status
-    if (_currentState == SCREEN_STATUS) {
-        _currentState = SCREEN_MENU;
-    } else {
-        _currentState = SCREEN_STATUS;
-    }
-}
-
-void DisplayMgr::render(IPAddress ip, uint16_t universe, bool hasData, int len, uint8_t *dmxData) {
+void DisplayMgr::render(DeviceConfig& config, IPAddress currentIP, E131Status netStatus) {
     _oled.clearDisplay();
     _drawHeader();
 
-    switch(_currentState) {
-        case SCREEN_STATUS:
-            _drawStatusPage(ip, universe, hasData, len, dmxData);
-            break;
-            
-        case SCREEN_MENU:
-            _drawMenuPage();
-            break;
-            
-        default:
-            break;
+    // Auto-cycle slideshow if in status mode
+    if (_currentState >= SCREEN_STATUS_IP && _currentState <= SCREEN_STATUS_SENSORS) {
+        _slideshowLogic(STATUS_SCREEN_LENGTH_MS);
     }
 
+    switch(_currentState) {
+        case SCREEN_STATUS_IP:
+            _drawStatusIP(currentIP, config.useDhcp);
+            break;
+        case SCREEN_STATUS_E131:
+            _drawStatusE131(config.universe, config.numLeds, netStatus);
+            break;
+        case SCREEN_STATUS_SENSORS:
+            _drawStatusSensors();
+            break;
+        case SCREEN_MENU_MAIN:
+            _drawMainMenu();
+            break;
+        case SCREEN_EDIT_UNIVERSE:
+            _drawEditScreen("SET UNIVERSE", config.universe);
+            break;
+        case SCREEN_EDIT_NUM_LEDS:
+            _drawEditScreen("SET NUM LEDS", config.numLeds);
+            break;
+        default: break;
+    }
     _oled.display();
 }
 
 void DisplayMgr::_drawHeader() {
     _oled.setCursor(0, 0);
-    _oled.print(F("ESP32-S3 DMX Node"));
+    _oled.print(F("CrowdLight TX"));
     _oled.drawLine(0, 8, 128, 8, SSD1306_WHITE);
 }
 
-void DisplayMgr::_drawStatusPage(IPAddress ip, uint16_t universe, bool hasData, int len, uint8_t *dmxData) {
-    _oled.setCursor(0, 12);
+void DisplayMgr::_drawStatusIP(IPAddress ip, bool dhcp) {
+    _oled.setCursor(0, 15);
+    _oled.print(F("Mode: ")); _oled.println(dhcp ? F("DHCP") : F("STATIC"));
+    _oled.println();
     _oled.print(F("IP: ")); _oled.println(ip);
-    _oled.print(F("Univ: ")); _oled.println(universe);
+}
 
-    _oled.setCursor(0, 35);
-    if (hasData) {
-        _oled.print(F("STATUS: RECEIVING"));
-        _oled.setCursor(0, 45);
-        _oled.printf("LED 0: (%d, %d, %d)\n", dmxData[0], dmxData[1], dmxData[2]);
-    } else {
-        _oled.print(F("STATUS: NO SIGNAL"));
-        _oled.setCursor(0, 45);
-        _oled.println(F("Check E1.31 Source"));
+void DisplayMgr::_drawStatusE131(uint16_t universe, uint16_t numLeds, E131Status status) {
+    _oled.setCursor(0, 15);
+    _oled.print(F("Univ: ")); _oled.println(universe);
+    _oled.print(F("LEDs: ")); _oled.println(numLeds);
+    _oled.println();
+    _oled.print(F("Stat: "));
+    
+    switch(status) {
+        case STATUS_DISCONNECTED: _oled.print(F("NO CABLE")); break;
+        case STATUS_CONNECTED:    _oled.print(F("LINK UP")); break;
+        case STATUS_ACTIVE:       _oled.print(F("RECEIVING")); break;
+        case STATUS_IDLE:         _oled.print(F("IDLE")); break;
     }
 }
 
-void DisplayMgr::_drawMenuPage() {
+void DisplayMgr::_drawStatusSensors() {
     _oled.setCursor(0, 15);
-    _oled.println(F("--- MAIN MENU ---"));
-    _oled.println(F("> Set Universe"));
-    _oled.println(F("  Set IP Address"));
-    _oled.println(F("  Test Radio"));
-    _oled.println(F("  Exit"));
-    
-    // In the future, you will pass an 'index' here to 
-    // highlight the selected row
+    _oled.println(F("Sensors:"));
+    _oled.setCursor(0, 30);
+    _oled.print(F("Batt: --.- V")); 
+    _oled.setCursor(0, 45);
+    _oled.print(F("Temp: --.- C"));
+}
+
+void DisplayMgr::_drawMainMenu() {
+    const char* items[] = {"Exit", "Set Universe", "Set Num LEDs"};
+    _oled.setCursor(0, 15);
+    for(int i=0; i<3; i++) {
+        if(i == _menuIndex) _oled.print(F("> "));
+        else _oled.print(F("  "));
+        _oled.println(items[i]);
+    }
+}
+
+void DisplayMgr::_drawEditScreen(const char* title, int value) {
+    _oled.setCursor(0, 15);
+    _oled.println(title);
+    _oled.setCursor(10, 35);
+    _oled.setTextSize(2);
+    _oled.print(value);
+    _oled.setTextSize(1);
+    _oled.setCursor(110, 35);
+    _oled.print(F("<>"));
+}
+
+void DisplayMgr::_slideshowLogic(uint16_t intervalMs) {
+    if (millis() - _lastSlideshowTime > intervalMs) {
+        _lastSlideshowTime = millis();
+        int next = (int)_currentState + 1;
+        if (next > SCREEN_STATUS_SENSORS) next = SCREEN_STATUS_IP;
+        _currentState = (ScreenState)next;
+    }
+}
+
+void DisplayMgr::handleButtonPress(int button, DeviceConfig& config, void (*saveCallback)(const DeviceConfig&)) {
+    // 1. Any button interrupts slideshow
+    if (_currentState <= SCREEN_STATUS_SENSORS) {
+        _currentState = SCREEN_MENU_MAIN;
+        _menuIndex = 0;
+        return;
+    }
+
+    // 2. Main Menu
+    if (_currentState == SCREEN_MENU_MAIN) {
+        if (button == BTN_UP)   _menuIndex = max(0, _menuIndex - 1);
+        if (button == BTN_DOWN) _menuIndex = min(2, _menuIndex + 1); 
+        if (button == BTN_SEL) {
+            switch(_menuIndex) {
+                case 0: _currentState = SCREEN_STATUS_IP; break; 
+                case 1: _currentState = SCREEN_EDIT_UNIVERSE; break;
+                case 2: _currentState = SCREEN_EDIT_NUM_LEDS; break;
+            }
+        }
+    }
+
+    // 3. Edit Screens
+    else if (_currentState == SCREEN_EDIT_UNIVERSE || _currentState == SCREEN_EDIT_NUM_LEDS) {
+        uint16_t* target = (_currentState == SCREEN_EDIT_UNIVERSE) ? &config.universe : &config.numLeds;
+        
+        switch (button) {
+            case BTN_UP:
+                if (_currentState == SCREEN_EDIT_UNIVERSE) {
+                    if (*target < MAX_UNIVERSE) (*target)++;
+                } else if (_currentState == SCREEN_EDIT_NUM_LEDS) {
+                    if (*target < MAX_NUM_LEDS) (*target)++;
+                } else {
+                    (*target)++;
+                }
+                break;
+            case BTN_DOWN:
+                if (_currentState == SCREEN_EDIT_UNIVERSE) {
+                    if (*target > MIN_UNIVERSE) (*target)--;
+                } else if (_currentState == SCREEN_EDIT_NUM_LEDS) {
+                    if (*target > MIN_NUM_LEDS) (*target)--;
+                } else {
+                    if (*target > 0) (*target)--;
+                }
+                break;
+            case BTN_LEFT:
+                break;
+            case BTN_RIGHT:
+                break;
+            case BTN_SEL:
+                saveCallback(config);
+                _currentState = SCREEN_MENU_MAIN;
+                break;
+            default:
+                break;
+        }
+    }
 }
