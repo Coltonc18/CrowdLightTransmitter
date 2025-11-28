@@ -1,11 +1,15 @@
 #include "DisplayMgr.h"
+#include "Logger.h"
 
 DisplayMgr::DisplayMgr() : _oled(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1), _currentState(SCREEN_BOOT) {}
 
 void DisplayMgr::begin() {
+    LOG_INFO_TAG("DISPLAY", "Initializing OLED display...");
     Wire.begin(DISPLAY_SDA, DISPLAY_SCL);
     if(!_oled.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
-        Serial.println(F("OLED Fail"));
+        LOG_ERROR_TAG("DISPLAY", "OLED initialization failed at address 0x%02X", OLED_ADDR);
+    } else {
+        LOG_INFO_TAG("DISPLAY", "OLED initialized successfully");
     }
     _oled.clearDisplay();
     
@@ -77,9 +81,9 @@ void DisplayMgr::_drawStatusSensors() {
     _oled.setCursor(0, 15);
     _oled.println(F("Sensors:"));
     _oled.setCursor(0, 30);
-    _oled.print(F("Batt: --.- V")); 
+    _oled.print(F("Input Voltage: --.- V")); 
     _oled.setCursor(0, 45);
-    _oled.print(F("Temp: --.- C"));
+    _oled.print(F("Temperature: --.- F"));
 }
 
 void DisplayMgr::_drawMainMenu() {
@@ -113,10 +117,13 @@ void DisplayMgr::_slideshowLogic(uint16_t intervalMs) {
 }
 
 void DisplayMgr::handleButtonPress(int button, DeviceConfig& config, void (*saveCallback)(const DeviceConfig&)) {
+    LOG_DEBUG_TAG("DISPLAY", "Button pressed: %d", button);
+    
     // 1. Any button interrupts slideshow
     if (_currentState <= SCREEN_STATUS_SENSORS) {
         _currentState = SCREEN_MENU_MAIN;
         _menuIndex = 0;
+        LOG_DEBUG_TAG("DISPLAY", "Entered menu mode");
         return;
     }
 
@@ -126,9 +133,18 @@ void DisplayMgr::handleButtonPress(int button, DeviceConfig& config, void (*save
         if (button == BTN_DOWN) _menuIndex = min(2, _menuIndex + 1); 
         if (button == BTN_SEL) {
             switch(_menuIndex) {
-                case 0: _currentState = SCREEN_STATUS_IP; break; 
-                case 1: _currentState = SCREEN_EDIT_UNIVERSE; break;
-                case 2: _currentState = SCREEN_EDIT_NUM_LEDS; break;
+                case 0: 
+                    _currentState = SCREEN_STATUS_IP;
+                    LOG_DEBUG_TAG("DISPLAY", "Exited menu");
+                    break; 
+                case 1: 
+                    _currentState = SCREEN_EDIT_UNIVERSE;
+                    LOG_DEBUG_TAG("DISPLAY", "Editing universe");
+                    break;
+                case 2: 
+                    _currentState = SCREEN_EDIT_NUM_LEDS;
+                    LOG_DEBUG_TAG("DISPLAY", "Editing num LEDs");
+                    break;
             }
         }
     }
@@ -161,6 +177,7 @@ void DisplayMgr::handleButtonPress(int button, DeviceConfig& config, void (*save
             case BTN_RIGHT:
                 break;
             case BTN_SEL:
+                LOG_INFO_TAG("DISPLAY", "Saving configuration changes");
                 saveCallback(config);
                 _currentState = SCREEN_MENU_MAIN;
                 break;

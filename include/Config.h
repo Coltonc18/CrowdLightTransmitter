@@ -3,8 +3,28 @@
 
 #include <Arduino.h>
 
+// ============================================================================
+// LOGGING CONFIGURATION
+// ============================================================================
+
+// Set compile-time log level (affects which logs are compiled into binary)
+// Options: LOG_LEVEL_NONE, LOG_LEVEL_ERROR, LOG_LEVEL_WARN, 
+//          LOG_LEVEL_INFO, LOG_LEVEL_DEBUG, LOG_LEVEL_VERBOSE
+#define LOG_LEVEL LOG_LEVEL_DEBUG
+
+// Enable/disable features
+#define LOG_ENABLE_COLORS true       // ANSI color codes in terminal
+#define LOG_ENABLE_TIMESTAMPS true   // Include millisecond timestamps
+#define LOG_BUFFER_SIZE 256          // Buffer for formatting log messages
+#define LOG_MAX_TAG_LENGTH 8         // Max characters for module tags
+#define LOG_ERROR_BUFFER_SIZE 50     // Circular buffer for recent errors
+
+// Uncomment to run logger self-tests on boot
+// #define DEBUG_TESTS
+
 // E1.31 Settings
 #define DEFAULT_IP 192,168,0,100
+#define DEFAULT_MAC { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED }
 #define E131_PORT 5568
 #define DEFAULT_DHCP_STATUS false
 #define MIN_UNIVERSE 1

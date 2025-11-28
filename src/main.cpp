@@ -2,6 +2,7 @@
 #include <nvs_flash.h>
 #include "Config.h"
 #include "ConfigData.h"
+#include "Logger.h"
 #include "ConfigManager.h"
 #include "E131Handler.h"
 #include "RadioLink.h"
@@ -33,10 +34,10 @@ void saveConfigCallback(const DeviceConfig& cfg) {
 
 // --- CORE 0: Network ---
 void networkLoop(void * parameter) {
-    uint8_t localDmxBuffer[512]; 
+    uint8_t localDmxBuffer[DMX_MAX_CHANNELS]; 
     
     // Note: We use static MAC, but IP is loaded from config
-    byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
+    byte mac[] = DEFAULT_MAC;
     IPAddress currentIP(deviceConfig.ipAddress);
 
     eth.begin(mac, currentIP);
@@ -110,26 +111,41 @@ void displayLoop(void * parameter) {
 
 void setup() {
     Serial.begin(115200);
+    delay(100); // Allow serial to initialize
+    
+    // 1. Initialize Logger
+    Logger::begin();
+    LOG_INFO_TAG("SYSTEM", "=== CrowdLight Transmitter Starting ===");
+    
+#ifdef DEBUG_TESTS
+    Logger::runTests();
+#endif
 
-    // 1. Config
+    // 2. Config
+    LOG_INFO_TAG("SYSTEM", "Initializing configuration...");
     configMgr.begin();
     configMgr.loadConfig(deviceConfig);
 
-    // 2. Buttons
+    // 3. Buttons
     pinMode(BTN_UP, INPUT_PULLUP);
     pinMode(BTN_DOWN, INPUT_PULLUP);
     pinMode(BTN_LEFT, INPUT_PULLUP);
     pinMode(BTN_RIGHT, INPUT_PULLUP);
     pinMode(BTN_SEL, INPUT_PULLUP);
 
-    // 3. Display
+    // 4. Display
+    LOG_INFO_TAG("SYSTEM", "Initializing display...");
     displayMgr.begin();
 
-    // 4. Tasks
-    Serial.println("Starting Tasks...");
+    // 5. Tasks
+    LOG_INFO_TAG("SYSTEM", "Creating FreeRTOS tasks...");
     xTaskCreatePinnedToCore(networkLoop, "NetTask", 10000, NULL, 1, &NetworkTaskHandle, 0);
+    LOG_INFO_TAG("SYSTEM", "Network task created on Core 0");
     xTaskCreatePinnedToCore(displayLoop, "DispTask", 10000, NULL, 1, &DisplayTaskHandle, 1);
+    LOG_INFO_TAG("SYSTEM", "Display task created on Core 1");
     xTaskCreatePinnedToCore(buttonInputLoop, "InTask", 4096, NULL, 1, &InputTaskHandle, 1);
+    LOG_INFO_TAG("SYSTEM", "Input task created on Core 1");
+    LOG_INFO_TAG("SYSTEM", "=== System Ready ===");
 }
 
 void loop() {}
